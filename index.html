@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>National Administrative Region Knowledge Graph</title>
+    <script src="https://cdn.bootcdn.net/ajax/libs/d3/7.9.0/d3.min.js"></script>
+    <script>if(typeof d3==='undefined'){document.write('<script src="https://unpkg.com/d3@7/dist/d3.min.js"><\/script>')}</script>
+    <style>
+        body { margin: 0; font-family: Arial, sans-serif; overflow: hidden; background-color: #f4f4f9; }
+        #chart { width: 100vw; height: 100vh; }
+        .node circle { stroke: #fff; stroke-width: 1.5px; }
+        .node text { font-size: 10px; pointer-events: none; }
+        .link { stroke: #999; stroke-opacity: 0.6; }
+        .tooltip {
+            position: absolute;
+            text-align: center;
+            padding: 8px;
+            font: 12px sans-serif;
+            background: rgba(0, 0, 0, 0.8);
+            color: #fff;
+            border-radius: 4px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            z-index: 10;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="controls">
+        <h3>Administrative Knowledge Graph</h3>
+        <p>Showing: Provinces and Cities (Filtered for performance)</p>
+        <div style="font-size: 12px; margin-top: 10px;">
+            <span style="color: #1f77b4;">●</span> Province<br>
+            <span style="color: #ff7f0e;">●</span> City<br>
+        </div>
+    </div>
+
+    <div id="chart"></div>
+    <div id="tooltip" class="tooltip"></div>
+
+    <script>
+        const width = window.innerWidth;
+        const height = window.innerHeight;
+
+        const svg = d3.select("#chart").append("svg")
+            .attr("width", width)
+            .attr("height", height)
+            .call(d3.zoom().on("zoom", function (event) {
+                svg.attr("transform", event.transform);
+            }))
+            .append("g");
+
+        const tooltip = d3.select("#tooltip");
+
+        const colorScale = {
+            "province": "#1f77b4",
+            "city": "#ff7f0e",
+            "county": "#2ca02c",
+            "village": "#d62728"
+        };
+
+        const radiusScale = {
+            "province": 15,
+            "city": 8,
+            "county": 4,
+            "village": 2
+        };
+
+        // Load the JSON data
+        d3.json("admin_knowledge_graph.json").then(function(graph) {
+
+            // FILTERING: 46k nodes is too much for D3 force layout in browser.
+            // We will only render Provinces and Cities for this concise visualization.
+            const allowedLevels = ["province", "city"];
+
+            const filteredNodes = graph.nodes.filter(n => allowedLevels.includes(n.level));
+            const filteredNodeIds = new Set(filteredNodes.map(n => n.id));
+
+            const filteredLinks = (graph.edges || graph.links).filter(l =>
+                filteredNodeIds.has(l.source) && filteredNodeIds.has(l.target)
+            );
+
+            console.log(`Rendered ${filteredNodes.length} nodes and ${filteredLinks.length} links.`);
+
+            const simulation = d3.forceSimulation(filteredNodes)
+                .force("link", d3.forceLink(filteredLinks).id(d => d.id).distance(30))
+                .force("charge", d3.forceManyBody().strength(-100))
+                .force("center", d3.forceCenter(width / 2, height / 2))
+                .force("collide", d3.forceCollide().radius(d => radiusScale[d.level] + 2).iterations(2));
+
+            const link = svg.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(filteredLinks)
+                .enter().append("line")
+                .attr("class", "link");
+
+            const node = svg.append("g")
+                .attr("class", "nodes")
+                .selectAll("g")
+                .data(filteredNodes)
+                .enter().append("g")
+                .attr("class", "node")
+                .call(d3.drag()
+                    .on("start", dragstarted)
+                    .on("drag", dragged)
+                    .on("end", dragended));
+
+            node.append("circle")
+                .attr("r", d => radiusScale[d.level] || 5)
+                .attr("fill", d => colorScale[d.level] || "#999")
+                .on("mouseover", function(event, d) {
+                    d3.select(this).attr("stroke", "#000").attr("stroke-width", 2);
+                    tooltip.transition().duration(200).style("opacity", .9);
+                    tooltip.html(`<strong>${d.name}</strong><br/>Code: ${d.id}<br/>Level: ${d.level}`)
+                        .style("left", (event.pageX + 10) + "px")
+                        .style("top", (event.pageY - 28) + "px");
+                })
+                .on("mouseout", function(d) {
+                    d3.select(this).attr("stroke", "#fff").attr("stroke-width", 1.5);
+                    tooltip.transition().duration(500).style("opacity", 0);
+                });
+
+            // Only show text for provinces to avoid clutter
+            node.append("text")
+                .attr("dx", 18)
+                .attr("dy", ".35em")
+                .text(d => d.level === "province" ? d.name : "")
+                .style("fill", "#333");
+
+            simulation.on("tick", () => {
+                link
+                    .attr("x1", d => d.source.x)
+                    .attr("y1", d => d.source.y)
+                    .attr("x2", d => d.target.x)
+                    .attr("y2", d => d.target.y);
+
+                node
+                    .attr("transform", d => `translate(${d.x},${d.y})`);
+            });
+
+            function dragstarted(event, d) {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x;
+                d.fy = d.y;
+            }
+
+            function dragged(event, d) {
+                d.fx = event.x;
+                d.fy = event.y;
+            }
+
+            function dragended(event, d) {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null;
+                d.fy = null;
+            }
+        }).catch(error => {
+            console.error("Error loading JSON data: ", error);
+            d3.select("#chart").html("<h2 style='color:red; text-align:center; margin-top:50px;'>Error loading data. Ensure you run this via a local web server (e.g., python -m http.server).</h2>");
+        });
+    </script>
+</body>
+</html>
