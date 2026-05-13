@@ -1,0 +1,11 @@
+# Generated knowledge graph data files (large, ~10MB each)
+admin_knowledge_graph.json
+admin_knowledge_graph.graphml
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# IDE
+.vscode/settings.json
